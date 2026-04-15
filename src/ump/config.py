@@ -60,11 +60,14 @@ class UmpSettings(BaseSettings):
         print(self)
 
     @field_validator("UMP_KEYCLOAK_URL", mode="before")
-    def ensure_trailing_slash(cls, value: str) -> str:
-        """Ensure UMP_KEYCLOAK_URL has a trailing slash."""
-        if not value.endswith("/"):
-            value += "/"
-        return value
+    def ensure_trailing_slash(cls, value):
+        """Ensure UMP_KEYCLOAK_URL has a trailing slash (accept str or HttpUrl)."""
+        if value is None:
+            return value
+        s = str(value)
+        if not s.endswith("/"):
+            s += "/"
+        return s
 
 
 app_settings = UmpSettings()

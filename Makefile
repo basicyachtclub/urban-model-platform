@@ -12,8 +12,9 @@ $(shell [ -f $(config) ] || cp .env.example $(config))
 include $(config)
 export $(shell sed 's/=.*//' $(config))
 
-# Note that the extra activate is needed to ensure that the activate floats env to the front of PATH
-CONDA_ACTIVATE=source $$(conda info --base)/etc/profile.d/conda.sh ; conda activate; conda activate
+# Prefer ./.venv/bin on PATH: works when the env is a conda prefix without `conda` on PATH,
+# and avoids a subshell that would discard conda activate for later lines.
+DEV_VENV_BIN := $(abspath ./.venv/bin)
 
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
 
@@ -27,14 +28,14 @@ initiate-dev:
     fi
 
 	@if [ ! -f providers.yaml ]; then \
-		cp providers.yaml.example providers.yaml \
+		cp providers.yaml.example providers.yaml && \
 		echo 'Creating providers.yaml from providers.yaml.example'; \
 	else \
 		echo 'providers.yaml already present'; \
 	fi
 
 	@if [ ! -f .env ]; then \
-		cp .env.example .env \
+		cp .env.example .env && \
 		echo 'Creating .env from .env.example'; \
 	else \
 		echo '.env already present'; \
@@ -58,23 +59,30 @@ upload-image: build-image
 	docker compose -f docker-compose-build.yaml push api
 
 start-dev:
-	($(CONDA_ACTIVATE) ./.venv)
+	@if [ ! -x "$(DEV_VENV_BIN)/flask" ]; then \
+		echo 'Missing $(DEV_VENV_BIN)/flask — run make initiate-dev (conda env + poetry install) or poetry install into ./.venv'; \
+		exit 1; \
+	fi
 
-	@ echo 'Starting development environment containers: ump database, geoserver, keycloak, keycloak database'
+	@ echo 'Starting development environment containers: api-db, keycloak, kc-db (GeoServer: docker compose up -d geoserver if needed)'
 	
 	docker compose -f docker-compose-dev.yaml up -d api-db keycloak kc-db
 	
 	@ echo 'Waiting for database to be ready'
-	sleep 7
+	sleep 10
 
-	@ echo 'initialize the database'
-	FLASK_APP=src.ump.main flask db init   
+	@ if [ ! -f migrations/env.py ]; then \
+		echo 'initialize the database (first run)'; \
+		FLASK_APP=src.ump.main $(DEV_VENV_BIN)/flask db init; \
+	else \
+		echo 'migrations/ already present, skipping flask db init'; \
+	fi
 
 	@ echo 'running database migrations'
-	FLASK_APP=src.ump.main flask db upgrade
+	FLASK_APP=src.ump.main $(DEV_VENV_BIN)/flask db upgrade
 
 	@ echo 'Current database state'
-	FLASK_APP=src.ump.main flask db current
+	FLASK_APP=src.ump.main $(DEV_VENV_BIN)/flask db current
 	
 	@ echo 'Now start a debug session with your preferred IDE, e.g. VSCode using launch.json'
 

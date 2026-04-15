@@ -43,7 +43,7 @@ make initiate-dev
 A conda `environment.yaml` is provided inside this repo.
 
 In order to create an external docker network to connect your containers to, run:
-`docker network create dev`
+`docker network create ump_dev` (must match `DOCKER_NETWORK` in `.env`; `make initiate-dev` creates this network).
 
 
 
