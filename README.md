@@ -12,7 +12,7 @@ This architecture is independent of any frontend application. One could use e.g.
 
 ## Documentation
 
-➡️📑 Check out the full **documentation** [here](https://citysciencelab.github.io/urban-model-platform/)
+➡️📑 Check out the full **documentation** [here](https://urban-model-platform.github.io/urban-model-platform/)
 
 ➡️🧑‍💻 Check out how to [Contribute](CONTRIBUTING.md)
 
