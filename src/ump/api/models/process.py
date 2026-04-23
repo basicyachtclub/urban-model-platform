@@ -310,13 +310,14 @@ class Process:
         if process_config.deterministic:
             return None
 
+        # Must match the hash expression used when inserting jobs (see job.py and migrations).
         sql = """
         select job_id from jobs where hash = encode(
             sha512(
                 convert_to(
                     %(parameters)s :: json :: text || %(process_version)s || %(user_id)s,
                     'UTF8'
-                ),
+                ) :: bytea
             ),
             'base64'
         )

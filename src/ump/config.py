@@ -21,6 +21,8 @@ class UmpSettings(BaseSettings):
     UMP_DATABASE_PORT: int = 5432
     UMP_DATABASE_USER: str = "postgres"
     UMP_DATABASE_PASSWORD: SecretStr = SecretStr("postgres")
+    # libpq / psycopg2 connect timeout (avoids long hangs if DB is not ready, e.g. right after `docker up`)
+    UMP_DATABASE_CONNECT_TIMEOUT: int = 10
     UMP_GEOSERVER_URL: HttpUrl | None = HttpUrl("http://geoserver:8080/geoserver")
     UMP_GEOSERVER_DB_HOST: str = "postgis"
     UMP_GEOSERVER_DB_PORT: int = 5432

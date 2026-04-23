@@ -69,7 +69,7 @@ start-dev:
 	docker compose -f docker-compose-dev.yaml up -d api-db keycloak kc-db
 	
 	@ echo 'Waiting for database to be ready'
-	sleep 10
+	sleep 15
 
 	@ if [ ! -f migrations/env.py ]; then \
 		echo 'initialize the database (first run)'; \

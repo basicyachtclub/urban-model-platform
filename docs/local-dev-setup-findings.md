@@ -22,6 +22,10 @@ The project’s “start development” command assumed two things that often ar
 
 - `make start-dev` starts **Postgres (API DB), Keycloak, and Keycloak’s DB**. It does **not** start GeoServer by default. If you need GeoServer locally, start it explicitly with Docker Compose.
 - After `make start-dev`, run the Flask app from your IDE or the command line as described in the project’s contributing guide.
+- **After a machine reboot:** start **Docker Desktop** before any `make` target that uses Docker. Otherwise you see *Cannot connect to the Docker daemon*.
+- The **`ump_dev` Docker network** (and your containers) **persist** across reboots. If `make initiate-dev` fails with *network with name ump_dev already exists*, the network is fine; you can ignore that or skip re-running `initiate-dev` when everything is already configured.
+- On **Apple Silicon**, the **example `modelserver`** image must build as **`linux/amd64`** so `rasterio` installs from a prebuilt wheel (see `platform` in `docker-compose-dev.yaml` and the submodule `Dockerfile`). Otherwise the image build can fail with Poetry/rasterio errors.
+- If **`POST` to `/api/processes/.../execution`** returns **500** with a **PostgreSQL syntax error** around `encode` / `sha512` / `check_for_cache`, the **`check_for_cache` SQL in `Process`** must match the hash used when inserting jobs (see `job.py`); this was corrected in `src/ump/api/models/process.py` so the same `curl` example in the docs succeeds.
 
 ---
 
@@ -48,6 +52,18 @@ The project’s “start development” command assumed two things that often ar
 6. **Documentation mismatch**  
    `CONTRIBUTING.md` referred to `docker network create dev` while `DOCKER_NETWORK` in `.env` defaults to **`ump_dev`**, causing “external network not found” if the user followed the doc literally.
 
+7. **Docker not running or network already exists**  
+   After a reboot, **Docker Desktop** may not be started yet → `initiate-dev` fails when creating the network. If **`ump_dev` already exists** from an earlier run, `docker network create ump_dev` fails with *already exists*; the network is still valid for Compose.
+
+8. **Silent wait / “hang” after `UmpSettings` during migrations**  
+   `db_handler` opens a **Postgres connection pool at import** (`minconn=1`) before `flask db upgrade` prints much else. If Postgres is slow to accept connections, or TCP hangs on **`localhost`**, the terminal looks frozen. **Mitigation:** `UMP_DATABASE_CONNECT_TIMEOUT` in settings; optional `UMP_DATABASE_HOST=127.0.0.1`; slightly longer sleep in `make start-dev` after `docker compose up`.
+
+9. **`modelserver` image build: `rasterio` + Poetry on `linux/arm64`**  
+   **Rasterio** 1.3.9 has no `manylinux` wheel for **Linux aarch64**; Docker on Apple Silicon defaults to `arm64` builds, so Poetry tries to build from sdist and fails (`pkg_resources` / build errors). **Mitigation:** build/run **`modelserver` as `linux/amd64`** (same idea as other services in this repo).
+
+10. **Process execution `POST` returns 500 (`ProgrammingError` near `sha512`)**  
+   The **cache lookup query** in `Process.check_for_cache` used **malformed SQL** (extra `),` and missing `:: bytea` on the `convert_to` result) compared to the **hash expression** used when **inserting** jobs in `Job`. Anonymous **hello-world** execution hit that path and crashed. **Fix:** align the SQL with `src/ump/api/models/job.py` / migrations.
+
 ### Changes made (files)
 
 | Area | File | Change |
@@ -57,6 +73,9 @@ The project’s “start development” command assumed two things that often ar
 | Host-side defaults | `.env.example` | Localhost Keycloak/GeoServer URLs; `UMP_GEOSERVER_DB_PORT` aligned with published API DB port on host. |
 | Local overrides | `.env` | Same host-side URL/port fixes for this machine’s setup. |
 | Docs | `CONTRIBUTING.md` | Network creation documents `ump_dev` and consistency with `DOCKER_NETWORK`. |
+| DB connect / migrations | `src/ump/config.py`, `src/ump/api/db_handler.py`, `src/ump/main.py`, `.env.example` | `UMP_DATABASE_CONNECT_TIMEOUT` and `connect_timeout` / query string so failed DB connects fail fast; reduced long silent hangs. |
+| `modelserver` on Apple Silicon | `docker-compose-dev.yaml`, `modelserver_example/Dockerfile` | `platform: linux/amd64` / `FROM --platform=linux/amd64` so `rasterio` uses a prebuilt manylinux x86_64 wheel. |
+| Process execution / cache | `src/ump/api/models/process.py` | `check_for_cache` SQL fixed to match `encode(sha512(convert_to(...)::bytea), 'base64')` as in `job.py`. |
 
 The **containerized `api` service** in `docker-compose-dev.yaml` still sets Keycloak (and related) URLs appropriate for **in-container** DNS where relevant; host `.env` is primarily for **local** Flask and Compose variable substitution.
 
@@ -70,6 +89,11 @@ The **containerized `api` service** in `docker-compose-dev.yaml` still sets Keyc
 | `flask db init` “already exists” | Skip init when `migrations/env.py` present. |
 | Keycloak / GeoServer unreachable from host API | `.env` must use `localhost` + external ports, not `keycloak` / `geoserver`. |
 | Compose “external network not found” | Create `ump_dev` or set `DOCKER_NETWORK` to match an existing network. |
+| *Cannot connect to the Docker daemon* | Start **Docker Desktop**; wait until it is ready. |
+| *Network ump_dev already exists* | **Normal** if you ran `initiate-dev` before; network persists across reboots. |
+| No output a long time after `UmpSettings` during `flask db` | DB not ready or slow connect; set **`UMP_DATABASE_CONNECT_TIMEOUT`**, use **`127.0.0.1`** for host, wait longer after `up`. |
+| `modelserver` build fails (rasterio / Poetry) on Apple Silicon | Build **`linux/amd64`** for `modelserver` (see `docker-compose-dev.yaml` + submodule `Dockerfile`). |
+| `POST .../execution` → 500, SQL error in `check_for_cache` / `sha512` | Fixed SQL in `process.py`; ensure your clone includes that change. |
 
 ### Verification
 
@@ -87,10 +111,21 @@ Optional GeoServer:
 docker compose -f docker-compose-dev.yaml up -d geoserver
 ```
 
+Example process execution (with **modelserver** up and `providers.yaml` pointing at `http://localhost:5005/` for host-side Flask):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:5000/api/processes/modelserver:hello-world/execution" \
+  -H "Content-Type: application/json" \
+  -d '{"inputs": {"name": "Me", "message": "Hi there"}}'
+```
+
+Expect **HTTP 201** and JSON with `jobID` and `status` (not a 500 HTML error page from the Werkzeug debugger).
+
 ---
 
 ## Environment notes
 
+- **“Hang” after the `UmpSettings` print during `flask db upgrade`:** importing `ump.api.db_handler` creates a `psycopg2` connection pool with `minconn=1` at import time, so a real TCP connection to Postgres is opened as soon as the app loads. If the database is not ready yet, the CLI can show no further output for a long time. Mitigations: wait a bit after `docker compose up`, set `UMP_DATABASE_CONNECT_TIMEOUT` (libpq), and consider `UMP_DATABASE_HOST=127.0.0.1` if `localhost` is slow to resolve.
 - **OneDrive / cloud-synced paths** can slow Docker volume I/O; if migrations time out, increase wait time or retry once Postgres is healthy.
 - **Apple Silicon**: some images use `platform: linux/amd64`; first pulls may be slower under emulation.
 

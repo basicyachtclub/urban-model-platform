@@ -15,11 +15,13 @@ logger = logging.getLogger(__name__)
 connection_pool = psycopg2.pool.SimpleConnectionPool(
     minconn=1,  # Minimum number of connections
     maxconn=49,  # Maximum number of connections, lower than postgres default
-    database = config.UMP_DATABASE_NAME,
-    host     = config.UMP_DATABASE_HOST,
-    user     = config.UMP_DATABASE_USER,
-    password = config.UMP_DATABASE_PASSWORD.get_secret_value(),
-    port     = config.UMP_DATABASE_PORT
+    database=config.UMP_DATABASE_NAME,
+    host=config.UMP_DATABASE_HOST,
+    user=config.UMP_DATABASE_USER,
+    password=config.UMP_DATABASE_PASSWORD.get_secret_value(),
+    port=config.UMP_DATABASE_PORT,
+    # Fail fast if Postgres is not reachable (pool opens minconn=1 at import; default TCP hang can be very long)
+    connect_timeout=config.UMP_DATABASE_CONNECT_TIMEOUT,
 )
 
 db_engine = engine = create_engine(
@@ -28,6 +30,7 @@ db_engine = engine = create_engine(
         f"{config.UMP_DATABASE_USER}:{config.UMP_DATABASE_PASSWORD.get_secret_value()}"
         f"@{config.UMP_DATABASE_HOST}:{config.UMP_DATABASE_PORT}"
         f"/{config.UMP_DATABASE_NAME}"
+        f"?connect_timeout={config.UMP_DATABASE_CONNECT_TIMEOUT}"
     ),
     pool_size=49,  # Maximum number of connections in the pool
     max_overflow=1,  # Additional connections allowed beyond pool_size
